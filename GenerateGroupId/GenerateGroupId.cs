@@ -18,8 +18,16 @@ namespace GenerateGroupId
 
         [Output("Group Id")]
         public OutArgument<string> OutputEntity { get; set; }
+
+        [Output("Parent Account")]
+        [ReferenceTarget("account")]
+        public OutArgument<EntityReference> parentAccount { get; set; } 
+
         protected override void Execute(CodeActivityContext context)
         {
+            //Extract the tracing service for use in debugging sandboxed plug-ins....
+            ITracingService tracingService = context.GetExtension<ITracingService>(); 
+
             int step = 0;
             try
             {
@@ -29,13 +37,14 @@ namespace GenerateGroupId
 
                 step = 1;
 
-                Entity LeadEntity = service.Retrieve("lead", WorkflowContext.PrimaryEntityId, new ColumnSet("fdx_leadid"));
+                Entity LeadEntity = service.Retrieve("lead", WorkflowContext.PrimaryEntityId, new ColumnSet("fdx_leadid", "parentaccountid"));
 
                 step = 2;
                 if (LeadEntity.Attributes.Contains("fdx_leadid"))
                 {
                     step = 3;
-                    Entity ParentLeadEntity = service.Retrieve("lead", ((EntityReference)LeadEntity.Attributes["fdx_leadid"]).Id, new ColumnSet("fdx_groupid", "leadid", "fdx_leadid"));
+                    Entity ParentLeadEntity = service.Retrieve("lead", ((EntityReference)LeadEntity.Attributes["fdx_leadid"]).Id, new ColumnSet("fdx_groupid", "leadid", "fdx_leadid", "parentaccountid"));
+
                     step = 4;
                     if (ParentLeadEntity.Attributes.Contains("fdx_groupid"))
                     {
@@ -49,20 +58,39 @@ namespace GenerateGroupId
                         this.OutputEntity.Set(context, null);
                         step = 8;
                     }
-                    //Commented because this case should be checked by Sales Rep, and run an On Demand WF on both Parent and Child
-                    /*else
+
+                    #region SMART-821: Tag account to connected lead with context lead's account if empty
+                    if (!LeadEntity.Attributes.Contains("parentaccountid"))
                     {
-                        step = 7;
-                        this.OutputEntity.Set(context, WorkflowContext.PrimaryEntityId.ToString());//((EntityReference)LeadEntity.Attributes["leadid"]).Id.ToString());
-                        step = 8;
-                    }*/
+                        if(ParentLeadEntity.Attributes.Contains("parentaccountid"))
+                        {
+                            this.parentAccount.Set(context, (EntityReference)ParentLeadEntity.Attributes["parentaccountid"]);
+
+                            tracingService.Trace("account Guid -" + this.parentAccount);
+                        }
+                    }
+                    else
+                    {
+                        this.parentAccount.Set(context, (EntityReference)LeadEntity.Attributes["parentaccountid"]);
+
+                        tracingService.Trace("account Guid -" + this.parentAccount);
+                    }
+                    #endregion                    
                 }
                 else
                 {
                     step = 9;
                     this.OutputEntity.Set(context, WorkflowContext.PrimaryEntityId.ToString());
+
+                    #region SMART-821: Tag account to connected lead with context lead's account if empty
+                    if (LeadEntity.Attributes.Contains("parentaccountid"))
+                    {
+                        this.parentAccount.Set(context, (EntityReference)LeadEntity.Attributes["parentaccountid"]);
+
+                        tracingService.Trace("account Guid -" + this.parentAccount);
+                    }
+                    #endregion
                 }
-                //Entity counter = service.Retrieve("fdx_snbcounter", this.InputEntity.Get(executionContext).Id, new ColumnSet("fdx_currentcounter"));
             }
             catch(Exception ex)
             {
